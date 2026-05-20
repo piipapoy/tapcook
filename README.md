@@ -4,19 +4,27 @@ Sistem kompor pintar dengan kontrol akses RFID, relay remote, dan monitoring aru
 
 ## Arsitektur
 
-```
-┌─────────────┐     MQTT      ┌──────────┐
-│   ESP32     │◄────────────►│  EMQX    │
-│ (RFID +     │  (port 1883)  │  (Docker) │
-│  Relay +    │              └────┬─────┘
-│  LCD)       │                   │
-└─────────────┘                   │ MQTT
-                                  │
-                           ┌──────▼──────┐
-                           │   Backend   │◄── HTTP ──► Admin Web
-                           │  FastAPI    │            (+ SSE realtime)
-                           │  SQLite     │
-                           └─────────────┘
+```mermaid
+graph LR
+    subgraph ESP32["ESP32"]
+        RFID[RFID Reader]
+        Relay[Relay]
+        LCD[LCD 16x2]
+    end
+    subgraph Server["Laptop Server"]
+        EMQX[EMQX Broker<br>port 1883]
+        Backend[FastAPI Backend<br>port 8000]
+        DB[(SQLite)]
+    end
+    Admin[Admin Dashboard<br>SSE Realtime]
+    User[User Register<br>Web Form]
+
+    ESP32 -- MQTT --> EMQX
+    EMQX -- MQTT --> Backend
+    Backend -- Read/Write --> DB
+    Backend -- SSE Events --> Admin
+    Admin -- HTTP POST --> Backend
+    User -- HTTP POST --> Backend
 ```
 
 ### Alur Kerja
