@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TapCook — Admin Dashboard</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0c0c0e;--surface:#16161a;--surface2:#1e1e24;--border:#2a2a32;--gold:#f5b342;--gold-dim:#f5b34222;--green:#3dd68c;--red:#f25f5c;--text:#e4e4e7;--muted:#888891;--radius:12px}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:20px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+header h1{font-size:1.5rem;font-weight:700;letter-spacing:-.3px}
+header h1 span{color:var(--gold)}
+.header-right{display:flex;align-items:center;gap:16px;font-size:.85rem}
+.status-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--gold);animation:pulse 2s infinite}
+.status-dot.off{background:var(--red);animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+#clock{color:var(--muted);font-variant-numeric:tabular-nums}
+
+.tabs{display:flex;gap:0;background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px}
+.tab{padding:14px 24px;cursor:pointer;font-size:.9rem;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;transition:all .2s;background:none;border-top:none;border-left:none;border-right:none}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--gold);border-bottom-color:var(--gold)}
+.tab .badge{background:var(--gold-dim);color:var(--gold);padding:2px 10px;border-radius:20px;font-size:.75rem;margin-left:8px}
+.tab .badge.green{background:#3dd68c22;color:var(--green)}
+
+.stats{display:flex;gap:12px;padding:12px 24px;background:var(--surface)}
+.stat{padding:6px 16px;border-radius:8px;background:var(--surface2);text-align:center}
+.stat .num{font-size:1.3rem;font-weight:700;color:var(--gold)}
+.stat .lbl{font-size:.75rem;color:var(--muted);margin-top:2px}
+
+.panel{display:none}
+.panel.active{display:block}
+main{max-width:960px;margin:0 auto;padding:24px}
+
+.empty-state{text-align:center;padding:60px 20px;color:var(--muted)}
+.empty-state .icon{font-size:2.5rem;margin-bottom:10px;opacity:.3}
+.empty-state p{font-size:1rem}
+
+.entry{background:var(--surface);border-radius:var(--radius);padding:0;margin-bottom:10px;overflow:hidden;border:1px solid var(--border);transition:all .2s;opacity:0;animation:fadeIn .3s forwards}
+@keyframes fadeIn{to{opacity:1}}
+.entry-header{display:flex;align-items:center;gap:14px;padding:14px 18px}
+.entry-num{width:30px;height:30px;border-radius:50%;background:var(--gold-dim);color:var(--gold);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0}
+.entry-code{font-family:"SF Mono","Courier New",monospace;font-size:1.7rem;font-weight:700;letter-spacing:6px;color:#fff;flex-shrink:0}
+.entry-status{font-size:.75rem;padding:3px 10px;border-radius:20px;font-weight:600;flex-shrink:0}
+.entry-status.active{background:var(--gold-dim);color:var(--gold)}
+.entry-status.expiring-soon{background:#f25f5c22;color:var(--red)}
+.entry-uid{font-family:"SF Mono",monospace;font-size:.8rem;color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.entry-footer{display:flex;align-items:center;gap:16px;padding:8px 18px;border-top:1px solid var(--border);font-size:.78rem;color:var(--muted)}
+.entry-footer .countdown{color:var(--gold);font-variant-numeric:tabular-nums;font-weight:600}
+.entry-footer .countdown.urgent{color:var(--red)}
+
+.user-entry{background:var(--surface);border-radius:var(--radius);padding:14px 18px;margin-bottom:8px;border:1px solid var(--border);display:flex;align-items:center;gap:14px;animation:fadeIn .3s forwards}
+.user-entry .avatar{width:36px;height:36px;border-radius:50%;background:var(--gold-dim);color:var(--gold);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1rem;flex-shrink:0}
+.user-entry .info{flex:1;min-width:0}
+.user-entry .info .name{font-weight:600;font-size:.95rem}
+.user-entry .info .uid{font-family:monospace;font-size:.75rem;color:var(--muted);margin-top:2px}
+.user-entry .info .date{font-size:.75rem;color:var(--muted);margin-top:2px}
+  .user-entry .check{color:var(--green);font-size:1.2rem}
+  .user-entry .del-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:4px;border-radius:6px;transition:all .15s;line-height:1}
+  .user-entry .del-btn:hover{color:var(--red);background:#f25f5c22}
+  .debug-btn{background:transparent;border:1px solid var(--red);color:var(--red);padding:6px 14px;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer;transition:all .2s}
+  .debug-btn:hover{background:var(--red);color:#fff}
+  .debug-btn:disabled{opacity:.5;cursor:wait}
+  .relay-btn{background:transparent;border:1px solid var(--green);color:var(--green);padding:6px 14px;border-radius:8px;font-size:.78rem;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap}
+  .relay-btn:hover{background:var(--green);color:#fff}
+  .relay-btn.off{border-color:var(--muted);color:var(--muted)}
+  .relay-btn.off:hover{background:var(--muted);color:#fff}
+  .relay-btn:disabled{opacity:.5;cursor:wait}
+
+@media(max-width:640px){
+  .entry-header{flex-wrap:wrap;gap:8px}
+  .entry-code{font-size:1.3rem;letter-spacing:4px}
+  .entry-uid{width:100%;text-align:left;order:10}
+  .tab{padding:12px 14px;font-size:.8rem}
+  header{padding:14px 16px}
+  main{padding:16px}
+}
+</style>
+</head>
+<body>
+<header>
+<h1>Tap<span>Cook</span> — Admin</h1>
+<div class="header-right">
+<span id="clock"></span>
+<button class="relay-btn off" id="relayBtn" onclick="toggleRelay()">⚡ Relay OFF</button>
+<button class="debug-btn" id="resetBtn" onclick="resetWiFi()">🔌 Reset WiFi</button>
+<span class="status-dot" id="connDot" title="Koneksi SSE"></span>
+</div>
+</header>
+
+<div class="tabs">
+<button class="tab active" data-panel="pending" id="tabPending">⏳ Pending <span class="badge" id="pendingBadge">0</span></button>
+<button class="tab" data-panel="users" id="tabUsers">👥 Terdaftar <span class="badge green" id="usersBadge">0</span></button>
+</div>
+
+<div class="panel active" id="panelPending">
+  <main>
+    <div class="empty-state" id="emptyPending">
+      <div class="icon">📋</div>
+      <p>Belum ada registrasi</p>
+      <p style="font-size:.85rem;margin-top:4px">Tap kartu baru untuk mulai</p>
+    </div>
+    <div id="pendingList"></div>
+  </main>
+</div>
+
+<div class="panel" id="panelUsers">
+  <main>
+    <div class="empty-state" id="emptyUsers">
+      <div class="icon">👥</div>
+      <p>Belum ada pengguna terdaftar</p>
+    </div>
+    <div id="usersList"></div>
+  </main>
+</div>
+
+<script>
+// === Tab switching ===
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('panel' + tab.dataset.panel.charAt(0).toUpperCase() + tab.dataset.panel.slice(1)).classList.add('active');
+  });
+});
+
+// === SSE / Real-time ===
+const emptyPending = document.getElementById('emptyPending');
+const pendingList = document.getElementById('pendingList');
+const usersList = document.getElementById('usersList');
+const emptyUsers = document.getElementById('emptyUsers');
+const pendingBadge = document.getElementById('pendingBadge');
+const usersBadge = document.getElementById('usersBadge');
+const connDot = document.getElementById('connDot');
+const clock = document.getElementById('clock');
+
+let entryCount = 0;
+let timers = {};
+let uidMap = {};
+
+function updateClock() {
+  const d = new Date();
+  clock.textContent = d.toLocaleString('id-ID', {weekday:'short',year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+const evt = new EventSource('/api/events');
+evt.addEventListener('pending', e => {
+  try {
+    const d = JSON.parse(e.data);
+    if(d.type === 'redeemed') {
+      removeByUid(d.uid);
+      loadUsers();
+    } else {
+      addEntry(d);
+    }
+  } catch(ex) {}
+});
+evt.addEventListener('relay', e => {
+  try {
+    const d = JSON.parse(e.data);
+    if(d.device_id === 'esp32_1') setRelayBtn(d.relay);
+  } catch(ex) {}
+});
+evt.addEventListener('ping', () => {});
+evt.onopen = () => connDot.className = 'status-dot';
+evt.onerror = () => connDot.className = 'status-dot off';
+
+// Initial load
+fetch('/api/pending').then(r=>r.json()).then(list => list.forEach(d => addEntry(d)));
+loadUsers();
+fetch('/api/device/esp32_1/relay').then(r=>r.json()).then(d => { if(d.ok) setRelayBtn(d.relay); });
+
+function setRelayBtn(on) {
+  const btn = document.getElementById('relayBtn');
+  if(on) { btn.className = 'relay-btn'; btn.textContent = '⚡ Relay ON'; }
+  else { btn.className = 'relay-btn off'; btn.textContent = '⚡ Relay OFF'; }
+}
+
+function loadUsers() {
+  fetch('/api/users').then(r=>r.json()).then(list => {
+    usersList.innerHTML = '';
+    if(list.length) emptyUsers.style.display = 'none'; else emptyUsers.style.display = 'block';
+    list.forEach(u => {
+      const d = document.createElement('div');
+      d.className = 'user-entry';
+      d.innerHTML = `
+        <div class="avatar">${u.name.charAt(0).toUpperCase()}</div>
+        <div class="info">
+          <div class="name">${u.name}</div>
+          <div class="uid">UID: ${u.uid}</div>
+          <div class="date">Terdaftar: ${new Date(u.created_at).toLocaleString('id-ID')}</div>
+        </div>
+        <button class="del-btn" onclick="deleteUser('${u.uid}')" title="Hapus kartu">✕</button>
+      `;
+      usersList.appendChild(d);
+    });
+    usersBadge.textContent = list.length;
+  });
+}
+
+// === Pending entry management ===
+function removeByUid(uid) {
+  const num = uidMap[uid];
+  if(num) { removeEntry(num); delete uidMap[uid]; }
+}
+
+function addEntry(d) {
+  removeByUid(d.uid);
+  emptyPending.style.display = 'none';
+  entryCount++;
+  const num = entryCount;
+  uidMap[d.uid] = num;
+
+  const div = document.createElement('div');
+  div.className = 'entry';
+  div.id = 'entry-' + num;
+
+  const expires = new Date(d.expires_at);
+  const ttlMs = expires - new Date();
+  const isExpiring = ttlMs < 60000;
+
+  div.innerHTML = `
+    <div class="entry-header">
+      <div class="entry-num">${num}</div>
+      <div class="entry-code">${d.code}</div>
+      <span class="entry-status ${isExpiring ? 'expiring-soon' : 'active'}">${isExpiring ? '⏳ Segera habis' : '✅ Aktif'}</span>
+      <div class="entry-uid">UID: ${d.uid}</div>
+    </div>
+    <div class="entry-footer">
+      <span>🕒 Dibuat: ${expires.toLocaleTimeString('id-ID')}</span>
+      <span>⏱️ Berakhir <span class="countdown ${isExpiring ? 'urgent' : ''}" id="cd-${num}">${formatCD(ttlMs)}</span></span>
+    </div>
+  `;
+  pendingList.prepend(div);
+  updateBadges();
+
+  if(ttlMs <= 0) {
+    setTimeout(() => removeEntry(num), 100);
+  } else {
+    timers[num] = setInterval(() => {
+      const el = document.getElementById('cd-' + num);
+      if(!el) { clearInterval(timers[num]); return; }
+      const rem = new Date(d.expires_at) - new Date();
+      if(rem <= 0) {
+        el.textContent = 'KEDALUWARSA';
+        clearInterval(timers[num]);
+        setTimeout(() => removeEntry(num), 2000);
+      } else {
+        el.textContent = formatCD(rem);
+        if(rem < 60000) el.className = 'countdown urgent';
+      }
+    }, 1000);
+  }
+}
+
+function removeEntry(num) {
+  const el = document.getElementById('entry-' + num);
+  if(el) {
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(30px)';
+    setTimeout(() => { el.remove(); updateBadges(); }, 300);
+  }
+  if(timers[num]) { clearInterval(timers[num]); delete timers[num]; }
+}
+
+function formatCD(ms) {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(t/60)}:${(t%60).toString().padStart(2,'0')}`;
+}
+
+function updateBadges() {
+  const n = pendingList.children.length;
+  pendingBadge.textContent = n;
+  if(n) emptyPending.style.display = 'none'; else emptyPending.style.display = 'block';
+}
+
+function toggleRelay() {
+  const btn = document.getElementById('relayBtn');
+  const isOn = !btn.classList.contains('off');
+  btn.disabled = true; btn.textContent = '⏳...';
+  fetch('/api/device/esp32_1/relay?state=' + !isOn, {method:'POST'})
+    .then(r => { if(!r.ok) throw new Error(); return r.json(); })
+    .then(() => { btn.textContent = '⏳ Menunggu...'; })
+    .catch(() => { btn.textContent = '❌ Gagal'; btn.disabled = false; setTimeout(() => setRelayBtn(isOn), 3000); });
+}
+
+function deleteUser(uid) {
+  if(!confirm('Hapus kartu ' + uid + '? Pengguna tidak bisa tap lagi.')) return;
+  fetch('/api/users/' + encodeURIComponent(uid), {method:'DELETE'})
+    .then(r => { if(!r.ok) throw new Error(); return r.json(); })
+    .then(d => { if(d.ok) loadUsers(); })
+    .catch(() => alert('Gagal menghapus'));
+}
+
+function resetWiFi() {
+  if(!confirm('Reset WiFi ESP32? Kompor akan restart ke mode config.')) return;
+  const btn = document.getElementById('resetBtn'); btn.disabled = true; btn.textContent = '⏳ Mereset...';
+  fetch('/api/device/esp32_1/reset-wifi', {method:'POST'})
+    .then(r => { if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(d => {
+      if(d.ok) { btn.textContent = '✅ OK'; setTimeout(() => { btn.disabled = false; btn.textContent = '🔌 Reset WiFi'; }, 3000); }
+      else throw new Error(d.error || 'unknown');
+    }).catch(e => {
+      console.error('Reset WiFi error:', e);
+      btn.textContent = '❌ ' + e.message; btn.disabled = false;
+      setTimeout(() => btn.textContent = '🔌 Reset WiFi', 4000);
+    });
+}
+</script>
+</body>
+</html>

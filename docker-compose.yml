@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: tapcook
+      POSTGRES_USER: tapcook
+      POSTGRES_PASSWORD: tapcook_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  emqx:
+    image: emqx:5.8
+    ports:
+      - "1883:1883"
+      - "18083:18083"
+    environment:
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: admin123
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - emqx
+    environment:
+      DATABASE_URL: postgresql+asyncpg://tapcook:tapcook_pass@postgres:5432/tapcook
+      MQTT_HOST: emqx
+      MQTT_PORT: 1883
+    volumes:
+      - ./backend/templates:/app/templates
+    restart: unless-stopped
+
+volumes:
+  pgdata:

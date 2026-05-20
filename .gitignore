@@ -1,0 +1,32 @@
+# Referensi tugas
+_ref/
+
+# Python
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+*.pyc
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Database
+backend/*.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+compile_commands.json
+
+# Git
+.git/

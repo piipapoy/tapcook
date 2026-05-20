@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TapCook — Daftar Kartu</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0c0c0e;--surface:#16161a;--surface2:#1e1e24;--border:#2a2a32;--gold:#f5b342;--green:#3dd68c;--red:#f25f5c;--text:#e4e4e7;--muted:#888891;--radius:12px}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.container{width:420px;max-width:100%}
+.card{background:var(--surface);border-radius:var(--radius);padding:40px;border:1px solid var(--border);transition:all .3s}
+.card h1{font-size:1.5rem;font-weight:700;letter-spacing:-.3px;margin-bottom:4px}
+.card h1 span{color:var(--gold)}
+.card .sub{color:var(--muted);margin-bottom:24px;font-size:.9rem}
+
+form{display:flex;flex-direction:column;gap:14px}
+.form-group{display:flex;flex-direction:column;gap:6px}
+.form-group label{font-size:.75rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+input{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px 16px;color:#fff;font-size:1rem;outline:none;transition:all .2s}
+input:focus{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-dim)}
+input.code-input{font-size:1.5rem;letter-spacing:12px;text-align:center;font-family:monospace}
+button{background:var(--gold);color:#0c0c0e;border:none;border-radius:8px;padding:14px;font-size:1rem;font-weight:700;cursor:pointer;transition:all .15s;margin-top:4px}
+button:active{transform:scale(.97)}
+button:disabled{opacity:.4;cursor:not-allowed;transform:none}
+
+/* Success overlay */
+.success-screen{display:none;text-align:center;padding:20px 0}
+.success-screen.show{display:block;animation:fadeUp .4s ease}
+.success-screen .checkmark{width:80px;height:80px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:2.5rem;color:#fff;animation:pop .3s cubic-bezier(.175,.885,.32,1.275)}
+.success-screen h2{font-size:1.3rem;margin-bottom:6px;color:var(--green)}
+.success-screen p{color:var(--muted);font-size:.9rem}
+.success-screen .name-display{font-size:1.1rem;color:var(--text);font-weight:600;margin:4px 0}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pop{0%{transform:scale(0)}80%{transform:scale(1.1)}100%{transform:scale(1)}}
+
+/* Loading spinner */
+.spinner{display:inline-block;width:20px;height:20px;border:3px solid #0c0c0e33;border-top-color:#0c0c0e;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+#msg{padding:14px 16px;border-radius:8px;display:none;font-size:.9rem;margin-top:12px;animation:fadeUp .2s ease}
+#msg.error{display:block;background:#f25f5c22;color:var(--red);border:1px solid var(--red)}
+
+footer{margin-top:20px;text-align:center;font-size:.75rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="card" id="cardForm">
+  <h1>Tap<span>Cook</span></h1>
+  <p class="sub">Masukkan kode dari admin untuk daftarkan kartu</p>
+  <form id="form" autocomplete="off">
+    <div class="form-group">
+      <label for="code">Kode 6 Digit</label>
+      <input type="text" id="code" class="code-input" placeholder="000000" maxlength="6" inputmode="numeric" pattern="[0-9]{6}" required autofocus>
+    </div>
+    <div class="form-group">
+      <label for="nama">Nama Kamu</label>
+      <input type="text" id="nama" placeholder="Masukkan nama" required>
+    </div>
+    <button type="submit" id="btn">
+      <span id="btnText">Daftar</span>
+    </button>
+  </form>
+  <div id="msg"></div>
+</div>
+
+<div class="card" id="cardSuccess" style="display:none">
+  <div class="success-screen show">
+    <div class="checkmark">✓</div>
+    <h2>Berhasil!</h2>
+    <div class="name-display" id="displayName"></div>
+    <p>Kartu kamu sudah terdaftar.<br>Sekarang tap kartu lagi untuk menyalakan relay.</p>
+  </div>
+</div>
+
+<footer>TapCook v1.0</footer>
+</div>
+
+<script>
+const form = document.getElementById('form');
+const msg = document.getElementById('msg');
+const btn = document.getElementById('btn');
+const btnText = document.getElementById('btnText');
+const cardForm = document.getElementById('cardForm');
+const cardSuccess = document.getElementById('cardSuccess');
+const displayName = document.getElementById('displayName');
+
+// Auto-move to name field after 6 digits
+document.getElementById('code').addEventListener('input', function() {
+  if(this.value.length >= 6) document.getElementById('nama').focus();
+});
+
+form.addEventListener('submit', async e => {
+  e.preventDefault();
+  msg.style.display = 'none';
+  msg.className = '';
+  btn.disabled = true;
+  btnText.innerHTML = '<span class="spinner"></span> Mendaftar...';
+
+  const data = new URLSearchParams({code: code.value.trim(), name: nama.value.trim()});
+
+  try {
+    const res = await fetch('/api/register', {method:'POST', body:data});
+    const d = await res.json();
+
+    if (d.ok) {
+      displayName.textContent = d.name;
+      cardForm.style.display = 'none';
+      cardSuccess.style.display = 'block';
+      form.reset();
+    } else {
+      msg.className = 'error';
+      msg.textContent = '✕ ' + d.error;
+      btn.disabled = false;
+      btnText.textContent = 'Daftar';
+      code.value = '';
+      code.focus();
+    }
+  } catch(e) {
+    msg.className = 'error';
+    msg.textContent = '✕ Gagal terhubung ke server';
+    btn.disabled = false;
+    btnText.textContent = 'Daftar';
+  }
+});
+</script>
+</body>
+</html>
