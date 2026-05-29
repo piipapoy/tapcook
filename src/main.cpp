@@ -27,7 +27,7 @@ unsigned long lastMonitor = 0;
 const float SENSITIVITY = 0.185;
 float kalmanX = 0, kalmanP = 1, kalmanQ = 0.01, kalmanR = 0.1;
 
-enum State { IDLE, WAITING_AUTH, SHOWING_REGISTER, SHOWING_RELAY_ON };
+enum State { IDLE, WAITING_AUTH, SHOWING_REGISTER, SHOWING_RELAY_ON, SHOWING_BILL };
 State state = IDLE;
 unsigned long stateStart = 0;
 
@@ -36,6 +36,14 @@ unsigned long lastMqttReconnect = 0;
 bool mqttConnected = false;
 unsigned long lastScroll = 0;
 int scrollPos = 0;
+
+String activeUserName = "";
+unsigned long relayOnTime = 0;
+float energyKWh = 0;
+float totalCost = 0;
+float tariff = 1444.7;
+unsigned long lastEnergyCalc = 0;
+unsigned long lastIdleRefresh = 0;
 
 char topicCard[64];
 char topicAuth[64];
@@ -228,11 +236,11 @@ float readCurrentAC() {
     delay(1);
   }
   int vppRaw = maxRaw - minRaw;
-  if (vppRaw < 100) return 0;
+  if (vppRaw < 20) return 0;
   float vpp = (vppRaw / 4095.0) * 3.3;
   float iPeak = vpp / SENSITIVITY;
   float iRms = iPeak / (2.0 * 1.414);
-  if (iRms < 0.1) return 0;
+  if (iRms < 0.02) return 0;
   return kalmanUpdate(iRms);
 }
 
@@ -287,6 +295,33 @@ void saveWiFi(String ssid, String pass) {
   prefs.end();
 }
 
+String extractName(String msg) {
+  int s = msg.indexOf("\"name\": \"");
+  if (s < 0) {
+    s = msg.indexOf("\"name\":\"");
+    if (s < 0) return "";
+    s += 8;
+  } else {
+    s += 9;
+  }
+  int e = msg.indexOf("\"", s);
+  if (e < 0) return "";
+  return msg.substring(s, e);
+}
+
+float loadTariff() {
+  prefs.begin("tapcook", true);
+  float t = prefs.getFloat("tariff", 1444.7f);
+  prefs.end();
+  return t;
+}
+
+void saveTariff(float t) {
+  prefs.begin("tapcook", false);
+  prefs.putFloat("tariff", t);
+  prefs.end();
+}
+
 // --- MQTT ---
 String extractUid(String msg) {
   int s = msg.indexOf("\"uid\": \"");
@@ -315,6 +350,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   Serial.print(">> MQTT datang: "); Serial.println(msg);
 
   String cardUid = extractUid(msg);
+  String name = extractName(msg);
 
   if (msg.indexOf("\"ok\"") > 0) {
     if (relayState && cardUid != activeCardUID) {
@@ -329,18 +365,27 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     digitalWrite(RELAY_PIN, relayState ? HIGH : LOW);
     publishRelayState();
     kalmanInit();
+
     if (relayState) {
       activeCardUID = cardUid;
+      activeUserName = name;
+      relayOnTime = millis();
+      energyKWh = 0;
+      totalCost = 0;
+      lastEnergyCalc = millis();
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.print(activeUserName.substring(0, 16));
+      lcd.setCursor(0, 1); lcd.print("Daya:    0W 00:00");
+      state = IDLE;
     } else {
       activeCardUID = "";
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.print("Energi: "); lcd.print(energyKWh, 2); lcd.print(" kWh");
+      lcd.setCursor(0, 1); lcd.print("Biaya: Rp"); lcd.print((int)totalCost);
+      state = SHOWING_BILL;
+      stateStart = millis();
     }
     Serial.print("relay: "); Serial.println(relayState ? "ON" : "OFF");
-    lcd.clear();
-    lcd.setCursor(0, 0); lcd.print("Relay: "); lcd.print(relayState ? "ON " : "OFF");
-    if (!relayState) {
-      lcd.setCursor(0, 1); lcd.print("Arus: 0.00A ");
-    }
-    state = IDLE;
   } else if (msg.indexOf("\"unknown\"") > 0) {
     if (relayState) {
       lcd.clear();
@@ -349,9 +394,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       state = SHOWING_RELAY_ON;
     } else {
       lcd.clear();
-      lcd.setCursor(0, 0); lcd.print("  Kartu Baru");
-      lcdScrollLine(1, "tinyurl.com/tc-regis", 0);
-      scrollPos = 0;
+      lcd.setCursor(0, 0); lcd.print("tinyurl.com/");
+      lcd.setCursor(0, 1); lcd.print("  tc-regis  ");
       state = SHOWING_REGISTER;
     }
     stateStart = millis();
@@ -368,22 +412,53 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     relayState = true;
     digitalWrite(RELAY_PIN, HIGH);
     activeCardUID = "";
+    activeUserName = "Admin";
+    relayOnTime = millis();
+    energyKWh = 0;
+    totalCost = 0;
+    lastEnergyCalc = millis();
     publishRelayState();
     kalmanInit();
     lcd.clear();
-    lcd.setCursor(0, 0); lcd.print("Relay: ON ");
+    lcd.setCursor(0, 0); lcd.print("Admin");
+    lcd.setCursor(0, 1); lcd.print("Daya:    0W 00:00");
     Serial.println(">> Relay ON via web");
     state = IDLE;
   } else if (msg.indexOf("\"relay_off\"") > 0) {
     relayState = false;
     digitalWrite(RELAY_PIN, LOW);
     activeCardUID = "";
+    activeUserName = "";
+    energyKWh = 0;
+    totalCost = 0;
     publishRelayState();
     lcd.clear();
     lcd.setCursor(0, 0); lcd.print("Relay: OFF");
     lcd.setCursor(0, 1); lcd.print("Arus: 0.00A ");
     Serial.println(">> Relay OFF via web");
     state = IDLE;
+  } else if (msg.indexOf("\"set_tariff\"") > 0) {
+    int s = msg.indexOf("\"value\":");
+    if (s > 0) {
+      s += 8;
+      while (s < (int)msg.length() && (msg[s] == ' ' || msg[s] == '\t')) s++;
+      int e = s;
+      while (e < (int)msg.length() && msg[e] != ',' && msg[e] != '}' && msg[e] != ']') e++;
+      tariff = msg.substring(s, e).toFloat();
+      saveTariff(tariff);
+      Serial.print(">> Tarif diubah: Rp"); Serial.println(tariff);
+    }
+    lcd.clear();
+    lcd.setCursor(0, 0); lcd.print("  Tarif OK!");
+    lcd.setCursor(0, 1); lcd.print("Rp"); lcd.print(tariff, 0); lcd.print("/kWh");
+    delay(1500);
+    if (relayState) {
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.print(activeUserName.substring(0, 16));
+      lcd.setCursor(0, 1); lcd.print("Daya:    0W 00:00");
+    } else {
+      showIdle();
+    }
   }
 }
 
@@ -595,6 +670,8 @@ void setup() {
   }
 
   mqttReconnect();
+  tariff = loadTariff();
+  Serial.print(">> Tarif: Rp"); Serial.println(tariff);
   calibrateACS712();
   showIdle();
 
@@ -631,25 +708,27 @@ void loop() {
     float v = (r / 4095.0) * 3.3;
     Serial.print("--- tap kartu sekarang --- raw:"); Serial.print(r);
     Serial.print(" "); Serial.print(v, 3); Serial.print("V arusAC:"); Serial.print(c, 3); Serial.println("A");
-    if (state == IDLE && WiFi.status() == WL_CONNECTED && mqtt.connected()) {
-      showIdle();
-    }
     lastPrompt = millis();
   }
 
-  if (state == SHOWING_REGISTER) {
-    if (millis() - lastScroll > 400) {
-      lastScroll = millis();
-      lcdScrollLine(1, "tinyurl.com/tc-regis", scrollPos);
-      scrollPos = (scrollPos + 1) % 8;
-    }
-    if (millis() - stateStart >= 10000) {
-      showIdle();
-      state = IDLE;
-    }
+  unsigned long now = millis();
+  if (state == IDLE && !relayState && now - lastIdleRefresh > 60000 && WiFi.status() == WL_CONNECTED) {
+    showIdle();
+    lastIdleRefresh = now;
+  }
+
+  if (state == SHOWING_REGISTER && millis() - stateStart >= 10000) {
+    showIdle();
+    state = IDLE;
   }
 
   if (state == SHOWING_RELAY_ON && millis() - stateStart >= 3000) {
+    showIdle();
+    state = IDLE;
+  }
+
+  if (state == SHOWING_BILL && millis() - stateStart >= 8000) {
+    activeUserName = "";
     showIdle();
     state = IDLE;
   }
@@ -695,11 +774,41 @@ void loop() {
     cardCooldown = millis();
   }
 
-  if (relayState && millis() - lastMonitor >= 1000) {
+  if (relayState && state == IDLE && millis() - lastMonitor >= 1000) {
     float c = readCurrentAC();
-    Serial.print("monitor arus: "); Serial.print(c, 3); Serial.println("A");
+    float daya = 220.0 * c * 0.85;
+
+    float dt = (millis() - lastEnergyCalc) / 1000.0;
+    energyKWh += (daya * dt) / 3600000.0;
+    totalCost = energyKWh * tariff;
+    lastEnergyCalc = millis();
+
+    unsigned long elapsed = (millis() - relayOnTime) / 1000;
+    int mins = elapsed / 60;
+    int secs = elapsed % 60;
+
+    lcd.setCursor(0, 0);
+    if (activeUserName.length() > 16) {
+      String buf = activeUserName + "   ";
+      lcd.print(buf.substring(scrollPos, scrollPos + 16));
+      if (millis() - lastScroll > 400) {
+        lastScroll = millis();
+        scrollPos = (scrollPos + 1) % (activeUserName.length() + 3);
+      }
+    } else {
+      lcd.print(activeUserName);
+      for (int i = activeUserName.length(); i < 16; i++) lcd.print(' ');
+    }
+
     lcd.setCursor(0, 1);
-    lcd.print("Arus: "); lcd.print(c, 2); lcd.print("A ");
+    char buf[17];
+    snprintf(buf, 17, "Daya:%4dW %02d:%02d", (int)daya, mins, secs);
+    lcd.print(buf);
+
+    Serial.print("monitor: "); Serial.print(c, 3); Serial.print("A ");
+    Serial.print((int)daya); Serial.print("W ");
+    Serial.print(energyKWh, 4); Serial.print("kWh Rp");
+    Serial.println((int)totalCost);
     lastMonitor = millis();
   }
 }

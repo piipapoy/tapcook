@@ -31,8 +31,8 @@ graph LR
 
 1. **Tap Kartu** — ESP32 baca UID RFID → kirim via MQTT ke `tapcook/{device_id}/card`
 2. **Backend** — cek database: jika dikenal → balas `ok` via `tapcook/{device_id}/auth`; jika baru → buat kode 6-digit (berlaku 10 menit) + kirim event SSE ke admin
-3. **ESP32** — terima `ok` → toggle relay ON/OFF; terima `unknown` → tampilkan URL registrasi di LCD
-4. **Admin** — dashboard real-time via SSE, lihat kode pending, user terdaftar, kontrol relay, reset WiFi
+3. **ESP32** — terima `ok` → toggle relay ON/OFF; saat ON tampilkan **nama user**, **daya (Watt)**, **durasi**; saat tap-out tampilkan **energi (kWh)** & **biaya (Rp)**
+4. **Admin** — dashboard real-time via SSE, lihat kode pending, user terdaftar, kontrol relay, reset WiFi, **atur tarif listrik**
 5. **Web Register** — user masukin kode + nama → kode redeemed → kartu aktif
 
 ### Topik MQTT
@@ -45,6 +45,7 @@ graph LR
 | `tapcook/{id}/cmd` | Backend → ESP32 | `{"cmd":"relay_on"}` | Nyalakan relay |
 | | | `{"cmd":"relay_off"}` | Matikan relay |
 | | | `{"cmd":"reset_wifi"}` | Reset WiFi ke mode config |
+| | | `{"cmd":"set_tariff","value":1444.7}` | Update tarif listrik (Rp/kWh) |
 | `tapcook/{id}/status` | ESP32 → Backend | `{"relay":true}` | Status relay terkini |
 
 ## Prasyarat
@@ -132,12 +133,25 @@ Buka `http://[IP_SERVER]:8000/admin`:
 | 👥 Terdaftar | User yang sudah terdaftar, bisa hapus |
 | ⚡ Relay | Tombol ON/OFF relay remote (real-time via MQTT) |
 | 🔌 Reset WiFi | Reset ESP32 ke Config Mode |
+| ⚙️ Tarif | Atur tarif listrik (Rp/kWh) — langsung dikirim ke ESP32 via MQTT |
 
 ### Relay Control
 
 - **Tap kartu terdaftar** — toggle relay ON/OFF (hanya kartu yang sama bisa matikan)
 - **Tombol Relay di Admin** — ON/OFF dari web (tidak terikat kartu)
-- **Monitoring** — LCD menampilkan arus AC (A) saat relay ON
+- **Monitoring** — LCD menampilkan nama user (scroll jika >16 karakter), daya (Watt), durasi pemakaian (MM:SS) saat relay ON; saat tap-out tampilkan total energi (kWh) & biaya (Rp)
+
+### API Tarif Listrik
+
+| Endpoint | Method | Deskripsi |
+|---|---|---|
+| `/api/tariff` | GET | Ambil tarif saat ini (Rp/kWh) |
+| `/api/tariff` | POST | Set tarif — parameter `tariff` (float) — dikirim ke ESP32 via MQTT |
+
+Perhitungan biaya dilakukan di ESP32:  
+`Daya (W) = 220V × Arus_RMS × 0.85`  
+`Energi (kWh) = Σ(Daya × dt) / 3.600.000`  
+`Biaya (Rp) = Energi × Tarif`
 
 ## Troubleshooting
 
@@ -148,17 +162,19 @@ Buka `http://[IP_SERVER]:8000/admin`:
 | Tap kartu gak respon | MQTT broker mati | `docker start tapcook_emqx`, restart backend |
 | Kode pending gak hilang | Timezone mismatch | Refresh halaman admin; kode expired bakal otomatis kehapus |
 | LCD blank / error | Address I2C berbeda | Cek `i2cdetect` atau ganti `0x27` di `main.cpp` |
+| Biaya selalu Rp0 | Tarif belum diset | Set tarif di Admin Dashboard > ⚙️ Tarif |
+| Username gak muncul | Kartu didaftarkan sebelum fitur ini | Hapus & daftar ulang kartu |
 
 ## Struktur Proyek
 
 ```
 tapcook/
 ├── backend/
-│   ├── main.py              # FastAPI server (routes, MQTT, SSE)
-│   ├── database.py          # SQLAlchemy models + SQLite
+│   ├── main.py              # FastAPI server (routes, MQTT, SSE, tariff API)
+│   ├── database.py          # SQLAlchemy models + SQLite (User, PendingRegistration, Config)
 │   ├── requirements.txt     # Python dependencies
 │   ├── templates/
-│   │   ├── admin.html       # Admin dashboard
+│   │   ├── admin.html       # Admin dashboard (+ tariff settings)
 │   │   └── register.html    # Halaman registrasi user
 │   └── start.sh             # Script start backend
 ├── src/

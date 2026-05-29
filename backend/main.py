@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
 
-from database import init_db, get_user_by_uid, create_pending, redeem_code, get_pending_list, get_active_pending_by_uid, get_all_users, delete_user_by_uid
+from database import init_db, get_user_by_uid, create_pending, redeem_code, get_pending_list, get_active_pending_by_uid, get_all_users, delete_user_by_uid, get_config, set_config
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
@@ -218,6 +218,22 @@ async def relay_control(device_id: str, state: bool = True):
     mqttc.publish(topic, json.dumps({"cmd": cmd}))
     log.info("Relay %s dikirim ke %s", cmd, topic)
     return {"ok": True, "device_id": device_id, "state": state}
+
+
+@app.get("/api/tariff")
+async def get_tariff():
+    val = await get_config("tariff", "1444.7")
+    return {"ok": True, "tariff": float(val)}
+
+
+@app.post("/api/tariff")
+async def set_tariff(tariff: float = Form(...)):
+    await set_config("tariff", str(tariff))
+    # Publish to all known devices via cmd topic
+    topic = TOPIC_CMD.format("+")
+    mqttc.publish(topic.replace("/+", "/esp32_1"), json.dumps({"cmd": "set_tariff", "value": tariff}))
+    log.info("Tarif diubah ke Rp %s/kWh dan dikirim ke ESP32", tariff)
+    return {"ok": True, "tariff": tariff}
 
 
 @app.delete("/api/users/{uid}")

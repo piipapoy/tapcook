@@ -17,6 +17,14 @@ class Base(DeclarativeBase):
     pass
 
 
+class Config(Base):
+    __tablename__ = "config"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    value: Mapped[str] = mapped_column(String(256), nullable=False)
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -111,6 +119,24 @@ async def get_pending_list():
             )
         )
         return result.scalars().all()
+
+
+async def get_config(key: str, default: str = "") -> str:
+    async with async_session() as session:
+        result = await session.execute(select(Config).where(Config.key == key))
+        row = result.scalar_one_or_none()
+        return row.value if row else default
+
+
+async def set_config(key: str, value: str) -> None:
+    async with async_session() as session:
+        result = await session.execute(select(Config).where(Config.key == key))
+        row = result.scalar_one_or_none()
+        if row:
+            row.value = value
+        else:
+            session.add(Config(key=key, value=value))
+        await session.commit()
 
 
 async def delete_user_by_uid(uid: str) -> bool:

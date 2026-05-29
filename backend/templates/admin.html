@@ -92,6 +92,7 @@ main{max-width:960px;margin:0 auto;padding:24px}
 <div class="tabs">
 <button class="tab active" data-panel="pending" id="tabPending">⏳ Pending <span class="badge" id="pendingBadge">0</span></button>
 <button class="tab" data-panel="users" id="tabUsers">👥 Terdaftar <span class="badge green" id="usersBadge">0</span></button>
+<button class="tab" data-panel="settings">⚙️ Tarif</button>
 </div>
 
 <div class="panel active" id="panelPending">
@@ -112,6 +113,28 @@ main{max-width:960px;margin:0 auto;padding:24px}
       <p>Belum ada pengguna terdaftar</p>
     </div>
     <div id="usersList"></div>
+  </main>
+</div>
+
+<div class="panel" id="panelSettings">
+  <main>
+    <div class="card" style="background:var(--surface);border-radius:var(--radius);padding:24px;border:1px solid var(--border);max-width:480px">
+      <h2 style="font-size:1.2rem;margin-bottom:4px">⚙️ Tarif Listrik</h2>
+      <p style="font-size:.85rem;color:var(--muted);margin-bottom:20px">Harga per kWh untuk menghitung biaya pemakaian di LCD kompor.</p>
+      <div class="field" style="margin-bottom:16px">
+        <label style="display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:6px">TARIF (Rp/kWh)</label>
+        <div class="input-wrap" style="display:flex;align-items:center;border:2px solid var(--border);border-radius:10px;background:var(--surface2)">
+          <span style="padding:0 8px 0 14px;color:var(--gold);font-weight:700;font-size:1.1rem">Rp</span>
+          <input type="number" id="tariffInput" step="0.01" min="0" placeholder="1444.70"
+                 style="flex:1;padding:12px 8px;border:none;background:transparent;color:var(--text);font-size:1.1rem;font-weight:600;outline:none">
+        </div>
+      </div>
+      <button class="save-btn" id="tariffSaveBtn" onclick="saveTariff()"
+              style="width:100%;padding:12px;background:var(--gold);color:#0c0c0e;border:none;border-radius:10px;font-size:.95rem;font-weight:700;cursor:pointer;transition:opacity .15s">
+        💾 Simpan Tarif
+      </button>
+      <div id="tariffStatus" style="margin-top:12px;font-size:.85rem;color:var(--green);display:none"></div>
+    </div>
   </main>
 </div>
 
@@ -294,6 +317,36 @@ function deleteUser(uid) {
     .then(r => { if(!r.ok) throw new Error(); return r.json(); })
     .then(d => { if(d.ok) loadUsers(); })
     .catch(() => alert('Gagal menghapus'));
+}
+
+function loadTariff() {
+  fetch('/api/tariff').then(r=>r.json()).then(d => {
+    if(d.ok) document.getElementById('tariffInput').value = d.tariff;
+  });
+}
+loadTariff();
+
+function saveTariff() {
+  const val = document.getElementById('tariffInput').value;
+  if(!val || parseFloat(val) < 0) return;
+  const btn = document.getElementById('tariffSaveBtn');
+  const status = document.getElementById('tariffStatus');
+  btn.disabled = true; btn.textContent = '⏳ Menyimpan...';
+  const form = new URLSearchParams();
+  form.append('tariff', val);
+  fetch('/api/tariff', {method:'POST', body: form})
+    .then(r => r.json()).then(d => {
+      if(d.ok) {
+        status.textContent = '✅ Tersimpan: Rp ' + d.tariff + '/kWh (dikirim ke kompor)';
+        status.style.display = 'block';
+        btn.textContent = '💾 Simpan Tarif';
+      } else throw new Error();
+    }).catch(() => {
+      status.textContent = '❌ Gagal menyimpan';
+      status.style.color = 'var(--red)';
+      status.style.display = 'block';
+      btn.textContent = '💾 Simpan Tarif';
+    }).finally(() => { btn.disabled = false; });
 }
 
 function resetWiFi() {
