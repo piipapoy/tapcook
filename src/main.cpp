@@ -45,10 +45,19 @@ float tariff = 1444.7;
 unsigned long lastEnergyCalc = 0;
 unsigned long lastIdleRefresh = 0;
 
+// Session tracking for ML
+float maxPowerW = 0;
+float sumPowerW = 0;
+int powerSamples = 0;
+unsigned long lastPowerReport = 0;
+
 char topicCard[64];
 char topicAuth[64];
 char topicCmd[64];
 char topicStatus[64];
+char topicSession[64];
+char topicPower[64];
+char topicAlert[64];
 
 Preferences prefs;
 
@@ -373,12 +382,23 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       energyKWh = 0;
       totalCost = 0;
       lastEnergyCalc = millis();
+      maxPowerW = 0;
+      sumPowerW = 0;
+      powerSamples = 0;
       lcd.clear();
       lcd.setCursor(0, 0); lcd.print(activeUserName.substring(0, 16));
       lcd.setCursor(0, 1); lcd.print("Daya:    0W 00:00");
       state = IDLE;
     } else {
+      // Publish session data for ML before clearing
+      unsigned long durS = (millis() - relayOnTime) / 1000;
+      float avgP = (powerSamples > 0) ? (sumPowerW / powerSamples) : 0;
+      String sessPayload = "{\"uid\":\"" + activeCardUID + "\",\"name\":\"" + activeUserName + "\",\"duration_s\":" + String(durS) + ",\"energy_kwh\":" + String(energyKWh, 4) + ",\"avg_power_w\":" + String((int)avgP) + ",\"max_power_w\":" + String((int)maxPowerW) + "}";
+      mqtt.publish(topicSession, sessPayload.c_str());
+      Serial.print(">> Session: "); Serial.println(sessPayload);
+
       activeCardUID = "";
+      maxPowerW = 0; sumPowerW = 0; powerSamples = 0;
       lcd.clear();
       lcd.setCursor(0, 0); lcd.print("Energi: "); lcd.print(energyKWh, 2); lcd.print(" kWh");
       lcd.setCursor(0, 1); lcd.print("Biaya: Rp"); lcd.print((int)totalCost);
@@ -417,6 +437,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     energyKWh = 0;
     totalCost = 0;
     lastEnergyCalc = millis();
+    maxPowerW = 0; sumPowerW = 0; powerSamples = 0;
     publishRelayState();
     kalmanInit();
     lcd.clear();
@@ -425,12 +446,21 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     Serial.println(">> Relay ON via web");
     state = IDLE;
   } else if (msg.indexOf("\"relay_off\"") > 0) {
+    // Publish session before turning off
+    if (relayState) {
+      unsigned long durS = (millis() - relayOnTime) / 1000;
+      float avgP = (powerSamples > 0) ? (sumPowerW / powerSamples) : 0;
+      String sessPayload = "{\"uid\":\"\",\"name\":\"" + activeUserName + "\",\"duration_s\":" + String(durS) + ",\"energy_kwh\":" + String(energyKWh, 4) + ",\"avg_power_w\":" + String((int)avgP) + ",\"max_power_w\":" + String((int)maxPowerW) + "}";
+      mqtt.publish(topicSession, sessPayload.c_str());
+      Serial.print(">> Session (admin): "); Serial.println(sessPayload);
+    }
     relayState = false;
     digitalWrite(RELAY_PIN, LOW);
     activeCardUID = "";
     activeUserName = "";
     energyKWh = 0;
     totalCost = 0;
+    maxPowerW = 0; sumPowerW = 0; powerSamples = 0;
     publishRelayState();
     lcd.clear();
     lcd.setCursor(0, 0); lcd.print("Relay: OFF");
@@ -459,6 +489,27 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     } else {
       showIdle();
     }
+  } else if (msg.indexOf("\"alert\"") > 0) {
+    // ML anomaly alert from backend
+    int ms = msg.indexOf("\"msg\":\"");
+    String alertMsg = "Anomali!";
+    if (ms > 0) {
+      ms += 7;
+      int me = msg.indexOf("\"", ms);
+      if (me > ms) alertMsg = msg.substring(ms, me);
+    }
+    lcd.clear();
+    lcd.setCursor(0, 0); lcd.print("! PERINGATAN !");
+    lcd.setCursor(0, 1); lcd.print(alertMsg.substring(0, 16));
+    Serial.print(">> ALERT: "); Serial.println(alertMsg);
+    delay(5000);
+    if (relayState) {
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.print(activeUserName.substring(0, 16));
+      lcd.setCursor(0, 1); lcd.print("Daya:    0W 00:00");
+    } else {
+      showIdle();
+    }
   }
 }
 
@@ -469,6 +520,7 @@ bool mqttReconnect() {
       Serial.println(" OK");
       mqtt.subscribe(topicAuth);
       mqtt.subscribe(topicCmd);
+      mqtt.subscribe(topicAlert);
       publishRelayState();
       mqttConnected = true;
     } else {
@@ -643,6 +695,9 @@ void setup() {
   snprintf(topicAuth, sizeof(topicAuth), "tapcook/%s/auth", DEVICE_ID);
   snprintf(topicCmd, sizeof(topicCmd), "tapcook/%s/cmd", DEVICE_ID);
   snprintf(topicStatus, sizeof(topicStatus), "tapcook/%s/status", DEVICE_ID);
+  snprintf(topicSession, sizeof(topicSession), "tapcook/%s/session", DEVICE_ID);
+  snprintf(topicPower, sizeof(topicPower), "tapcook/%s/power", DEVICE_ID);
+  snprintf(topicAlert, sizeof(topicAlert), "tapcook/%s/alert", DEVICE_ID);
 
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(mqttCallback);
@@ -778,10 +833,22 @@ void loop() {
     float c = readCurrentAC();
     float daya = 220.0 * c * 0.85;
 
+    // Track session stats for ML
+    if (daya > maxPowerW) maxPowerW = daya;
+    sumPowerW += daya;
+    powerSamples++;
+
     float dt = (millis() - lastEnergyCalc) / 1000.0;
     energyKWh += (daya * dt) / 3600000.0;
     totalCost = energyKWh * tariff;
     lastEnergyCalc = millis();
+
+    // Report power to backend every 10 seconds
+    if (millis() - lastPowerReport >= 10000) {
+      String pwrPayload = "{\"power_w\":" + String((int)daya) + ",\"current_a\":" + String(c, 3) + "}";
+      mqtt.publish(topicPower, pwrPayload.c_str());
+      lastPowerReport = millis();
+    }
 
     unsigned long elapsed = (millis() - relayOnTime) / 1000;
     int mins = elapsed / 60;

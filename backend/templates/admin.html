@@ -68,6 +68,34 @@ main{max-width:960px;margin:0 auto;padding:24px}
   .relay-btn.off:hover{background:var(--muted);color:#fff}
   .relay-btn:disabled{opacity:.5;cursor:wait}
 
+  /* Anomaly styles */
+  .badge.red{background:#f25f5c22;color:var(--red)}
+  .ml-status{display:flex;align-items:center;gap:12px;padding:10px 24px;background:var(--surface);border-bottom:1px solid var(--border);font-size:.82rem}
+  .ml-status .phase-label{font-weight:600}
+  .ml-status .phase-learning{color:#f59e0b}
+  .ml-status .phase-statistical{color:#f97316}
+  .ml-status .phase-ml{color:var(--green)}
+  .ml-bar{flex:1;max-width:200px;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden}
+  .ml-bar-fill{height:100%;border-radius:3px;transition:width .5s ease}
+  .ml-bar-fill.learning{background:#f59e0b}
+  .ml-bar-fill.statistical{background:#f97316}
+  .ml-bar-fill.ml{background:var(--green)}
+  .power-display{font-size:.85rem;color:var(--muted);padding:0 8px}
+  .power-display .val{color:var(--gold);font-weight:700;font-variant-numeric:tabular-nums}
+
+  .alert-entry{background:var(--surface);border-radius:var(--radius);padding:14px 18px;margin-bottom:8px;border:1px solid var(--border);display:flex;align-items:flex-start;gap:14px;animation:fadeIn .3s forwards}
+  .alert-entry.critical{border-left:3px solid var(--red)}
+  .alert-entry.warning{border-left:3px solid #f59e0b}
+  .alert-entry.acked{opacity:.5}
+  .alert-icon{font-size:1.5rem;flex-shrink:0;margin-top:2px}
+  .alert-body{flex:1;min-width:0}
+  .alert-body .alert-msg{font-weight:600;font-size:.95rem;margin-bottom:4px}
+  .alert-body .alert-meta{font-size:.78rem;color:var(--muted);display:flex;flex-wrap:wrap;gap:10px}
+  .alert-body .alert-meta .sev-critical{color:var(--red);font-weight:600}
+  .alert-body .alert-meta .sev-warning{color:#f59e0b;font-weight:600}
+  .ack-btn{background:none;border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:8px;font-size:.75rem;cursor:pointer;transition:all .15s;white-space:nowrap}
+  .ack-btn:hover{border-color:var(--green);color:var(--green)}
+
 @media(max-width:640px){
   .entry-header{flex-wrap:wrap;gap:8px}
   .entry-code{font-size:1.3rem;letter-spacing:4px}
@@ -75,6 +103,7 @@ main{max-width:960px;margin:0 auto;padding:24px}
   .tab{padding:12px 14px;font-size:.8rem}
   header{padding:14px 16px}
   main{padding:16px}
+  .ml-status{flex-wrap:wrap;gap:6px}
 }
 </style>
 </head>
@@ -83,15 +112,24 @@ main{max-width:960px;margin:0 auto;padding:24px}
 <h1>Tap<span>Cook</span> — Admin</h1>
 <div class="header-right">
 <span id="clock"></span>
+<span class="power-display" id="powerDisplay">⚡ <span class="val">0W</span></span>
 <button class="relay-btn off" id="relayBtn" onclick="toggleRelay()">⚡ Relay OFF</button>
 <button class="debug-btn" id="resetBtn" onclick="resetWiFi()">🔌 Reset WiFi</button>
 <span class="status-dot" id="connDot" title="Koneksi SSE"></span>
 </div>
 </header>
 
+<div class="ml-status" id="mlStatus">
+  <span>🤖 ML:</span>
+  <span class="phase-label phase-learning" id="mlPhaseLabel">Learning</span>
+  <div class="ml-bar"><div class="ml-bar-fill learning" id="mlBarFill" style="width:0%"></div></div>
+  <span id="mlInfo" style="color:var(--muted)">Menunggu data...</span>
+</div>
+
 <div class="tabs">
 <button class="tab active" data-panel="pending" id="tabPending">⏳ Pending <span class="badge" id="pendingBadge">0</span></button>
 <button class="tab" data-panel="users" id="tabUsers">👥 Terdaftar <span class="badge green" id="usersBadge">0</span></button>
+<button class="tab" data-panel="anomalies" id="tabAnomalies">🔔 Anomali <span class="badge red" id="anomalyBadge">0</span></button>
 <button class="tab" data-panel="settings">⚙️ Tarif</button>
 </div>
 
@@ -113,6 +151,17 @@ main{max-width:960px;margin:0 auto;padding:24px}
       <p>Belum ada pengguna terdaftar</p>
     </div>
     <div id="usersList"></div>
+  </main>
+</div>
+
+<div class="panel" id="panelAnomalies">
+  <main>
+    <div class="empty-state" id="emptyAnomalies">
+      <div class="icon">🛡️</div>
+      <p>Tidak ada anomali terdeteksi</p>
+      <p style="font-size:.85rem;margin-top:4px">Sistem akan memberikan peringatan jika ada penggunaan tidak biasa</p>
+    </div>
+    <div id="anomalyList"></div>
   </main>
 </div>
 
@@ -189,12 +238,27 @@ evt.addEventListener('relay', e => {
   } catch(ex) {}
 });
 evt.addEventListener('ping', () => {});
+evt.addEventListener('anomaly', e => {
+  try { const d = JSON.parse(e.data); addAnomalyEntry(d); } catch(ex) {}
+});
+evt.addEventListener('anomaly_ack', e => {
+  try { const d = JSON.parse(e.data); markAnomalyAcked(d.id); } catch(ex) {}
+});
+evt.addEventListener('power', e => {
+  try {
+    const d = JSON.parse(e.data);
+    document.querySelector('#powerDisplay .val').textContent = Math.round(d.power_w) + 'W';
+  } catch(ex) {}
+});
+evt.addEventListener('session', e => { loadMLStatus(); });
 evt.onopen = () => connDot.className = 'status-dot';
 evt.onerror = () => connDot.className = 'status-dot off';
 
 // Initial load
 fetch('/api/pending').then(r=>r.json()).then(list => list.forEach(d => addEntry(d)));
 loadUsers();
+loadAnomalies();
+loadMLStatus();
 fetch('/api/device/esp32_1/relay').then(r=>r.json()).then(d => { if(d.ok) setRelayBtn(d.relay); });
 
 function setRelayBtn(on) {
@@ -362,6 +426,89 @@ function resetWiFi() {
       btn.textContent = '❌ ' + e.message; btn.disabled = false;
       setTimeout(() => btn.textContent = '🔌 Reset WiFi', 4000);
     });
+}
+
+// === Anomaly management ===
+const anomalyList = document.getElementById('anomalyList');
+const emptyAnomalies = document.getElementById('emptyAnomalies');
+const anomalyBadge = document.getElementById('anomalyBadge');
+
+function loadAnomalies() {
+  fetch('/api/anomalies').then(r=>r.json()).then(list => {
+    anomalyList.innerHTML = '';
+    let unacked = 0;
+    if(list.length) emptyAnomalies.style.display='none'; else emptyAnomalies.style.display='block';
+    list.forEach(a => { addAnomalyEntry(a, false); if(!a.acknowledged) unacked++; });
+    anomalyBadge.textContent = unacked;
+  });
+}
+
+function addAnomalyEntry(a, prepend=true) {
+  emptyAnomalies.style.display='none';
+  const div = document.createElement('div');
+  div.className = 'alert-entry ' + a.severity + (a.acknowledged ? ' acked' : '');
+  div.id = 'anomaly-' + a.id;
+  const icon = a.severity === 'critical' ? '🚨' : '⚠️';
+  const sevClass = 'sev-' + a.severity;
+  const sevLabel = a.severity === 'critical' ? 'KRITIS' : 'PERINGATAN';
+  const time = new Date(a.created_at).toLocaleString('id-ID');
+  const method = a.method === 'isolation_forest' ? 'ML' : 'Statistik';
+  const ackBtn = a.acknowledged ? '<span style="color:var(--green);font-size:.8rem">✓ Diakui</span>' :
+    `<button class="ack-btn" onclick="ackAnomaly(${a.id})">✓ Akui</button>`;
+  div.innerHTML = `
+    <div class="alert-icon">${icon}</div>
+    <div class="alert-body">
+      <div class="alert-msg">${a.message}</div>
+      <div class="alert-meta">
+        <span class="${sevClass}">${sevLabel}</span>
+        <span>📊 ${method} (skor: ${a.score})</span>
+        <span>🕒 ${time}</span>
+      </div>
+    </div>
+    ${ackBtn}
+  `;
+  if(prepend) { anomalyList.prepend(div); updateAnomalyBadge(1); }
+  else anomalyList.appendChild(div);
+}
+
+function markAnomalyAcked(id) {
+  const el = document.getElementById('anomaly-' + id);
+  if(el) { el.classList.add('acked'); el.querySelector('.ack-btn')?.replaceWith(Object.assign(document.createElement('span'),{style:'color:var(--green);font-size:.8rem',textContent:'✓ Diakui'})); }
+  updateAnomalyBadge(-1);
+}
+
+function updateAnomalyBadge(delta) {
+  let n = parseInt(anomalyBadge.textContent||'0') + delta;
+  if(n<0) n=0;
+  anomalyBadge.textContent = n;
+}
+
+function ackAnomaly(id) {
+  fetch('/api/anomalies/' + id + '/ack', {method:'POST'})
+    .then(r=>r.json()).then(d => { if(d.ok) markAnomalyAcked(id); })
+    .catch(() => alert('Gagal'));
+}
+
+// === ML Status ===
+function loadMLStatus() {
+  fetch('/api/ml/status/esp32_1').then(r=>r.json()).then(d => {
+    const label = document.getElementById('mlPhaseLabel');
+    const bar = document.getElementById('mlBarFill');
+    const info = document.getElementById('mlInfo');
+    label.className = 'phase-label phase-' + d.phase;
+    bar.className = 'ml-bar-fill ' + d.phase;
+    bar.style.width = d.progress_pct + '%';
+    if(d.phase === 'learning') {
+      label.textContent = '🟡 Learning';
+      info.textContent = d.session_count + '/' + d.min_stats + ' sesi — belum cukup data';
+    } else if(d.phase === 'statistical') {
+      label.textContent = '🟠 Statistical';
+      info.textContent = d.session_count + '/' + d.min_ml + ' sesi — deteksi Z-score aktif';
+    } else {
+      label.textContent = '🟢 ML Active';
+      info.textContent = 'Isolation Forest aktif (' + d.session_count + ' sesi, trained: ' + (d.trained_on||0) + ')';
+    }
+  }).catch(() => {});
 }
 </script>
 </body>

@@ -47,6 +47,9 @@ graph LR
 | | | `{"cmd":"reset_wifi"}` | Reset WiFi ke mode config |
 | | | `{"cmd":"set_tariff","value":1444.7}` | Update tarif listrik (Rp/kWh) |
 | `tapcook/{id}/status` | ESP32 → Backend | `{"relay":true}` | Status relay terkini |
+| `tapcook/{id}/session` | ESP32 → Backend | `{"uid":"...","duration_s":300,...}` | Data sesi selesai (untuk ML) |
+| `tapcook/{id}/power` | ESP32 → Backend | `{"power_w":93,"current_a":0.5}` | Power reading tiap 10 detik |
+| `tapcook/{id}/alert` | Backend → ESP32 | `{"cmd":"alert","msg":"..."}` | Anomaly alert dari ML |
 
 ## Prasyarat
 
@@ -153,6 +156,29 @@ Perhitungan biaya dilakukan di ESP32:
 `Energi (kWh) = Σ(Daya × dt) / 3.600.000`  
 `Biaya (Rp) = Energi × Tarif`
 
+## Anomaly Detection (ML)
+
+Sistem anomaly detection berjalan otomatis di backend dengan 3 fase:
+
+| Fase | Sesi | Metode | Keterangan |
+|------|------|--------|-----------|
+| 🟡 Learning | 0–19 | Tidak ada deteksi | Hanya kumpulkan data |
+| 🟠 Statistical | 20–49 | Z-score | Deteksi berdasarkan mean ± 2.5σ |
+| 🟢 ML Active | 50+ | Isolation Forest | Full ML anomaly detection |
+
+**Features**: durasi, energi, daya rata-rata, daya puncak, jam/hari/bulan (cyclic encoding untuk tangkap pola musiman seperti Ramadhan/Lebaran).
+
+Setiap device (kosan) punya model ML terpisah. Alert muncul di admin dashboard dan LCD ESP32.
+
+### API Anomaly
+
+| Endpoint | Method | Deskripsi |
+|----------|--------|-----------|
+| `/api/anomalies` | GET | Daftar anomaly alerts |
+| `/api/anomalies/{id}/ack` | POST | Acknowledge alert |
+| `/api/ml/status/{device_id}` | GET | Status model ML (fase, jumlah sesi) |
+| `/api/sessions/{device_id}` | GET | Riwayat sesi pemakaian |
+
 ## Troubleshooting
 
 | Gejala | Kemungkinan | Solusi |
@@ -170,11 +196,13 @@ Perhitungan biaya dilakukan di ESP32:
 ```
 tapcook/
 ├── backend/
-│   ├── main.py              # FastAPI server (routes, MQTT, SSE, tariff API)
-│   ├── database.py          # SQLAlchemy models + SQLite (User, PendingRegistration, Config)
+│   ├── main.py              # FastAPI server (routes, MQTT, SSE, tariff API, ML)
+│   ├── database.py          # SQLAlchemy models (User, Session, AnomalyAlert)
+│   ├── anomaly_detector.py  # ML module (Isolation Forest + cold start)
 │   ├── requirements.txt     # Python dependencies
+│   ├── models/              # Trained ML models (per device)
 │   ├── templates/
-│   │   ├── admin.html       # Admin dashboard (+ tariff settings)
+│   │   ├── admin.html       # Admin dashboard (+ anomaly tab + ML status)
 │   │   └── register.html    # Halaman registrasi user
 │   └── start.sh             # Script start backend
 ├── src/
