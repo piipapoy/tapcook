@@ -249,7 +249,7 @@ float readCurrentAC() {
   float vpp = (vppRaw / 4095.0) * 3.3;
   float iPeak = vpp / SENSITIVITY;
   float iRms = iPeak / (2.0 * 1.414);
-  if (iRms < 0.02) return 0;
+  if (iRms < 0.04) return 0;
   return kalmanUpdate(iRms);
 }
 
@@ -701,6 +701,7 @@ void setup() {
 
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(mqttCallback);
+  mqtt.setKeepAlive(60);
 
   String savedSSID, savedPass;
   bool hasCreds = loadWiFi(savedSSID, savedPass);
